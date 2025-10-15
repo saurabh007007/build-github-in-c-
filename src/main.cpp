@@ -1,7 +1,10 @@
+#include "zstr.hpp"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <string>
+// #include <zstr.hpp>
+
 using namespace std;
 
 int main(int argc, char *argv[])
