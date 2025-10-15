@@ -1,81 +1,107 @@
-#include "zstr.hpp"
-#include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 #include <string>
-// #include <zstr.hpp>
+#include <vector>
+#include <zlib.h>
 
 using namespace std;
 
-int main(int argc, char *argv[])
-{
-    // Flush after every std::cout / std::cerr
-    std::cout << std::unitbuf;
-    std::cerr << std::unitbuf;
+string decompressZlib(const string &compressed) {
+  z_stream zs{};
+  inflateInit(&zs);
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    std::cerr << "Logs from your program will appear here!\n";
+  zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(compressed.data()));
+  zs.avail_in = compressed.size();
 
-    // Uncomment this block to pass the first stage
-    //
-    if (argc < 2) {
-        std::cerr << "No command provided.\n";
-        return EXIT_FAILURE;
-    }
-    //
-    std::string command = argv[1];
-    //
-    if (command == "init") {
-        try {
-            std::filesystem::create_directory(".git");
-            std::filesystem::create_directory(".git/objects");
-            std::filesystem::create_directory(".git/refs");
-    
-            std::ofstream headFile(".git/HEAD");
-            if (headFile.is_open()) {
-                headFile << "ref: refs/heads/main\n";
-                headFile.close();
-            } else {
-                std::cerr << "Failed to create .git/HEAD file.\n";
-                return EXIT_FAILURE;
-            }
-    
-            std::cout << "Initialized git directory\n";
-        } catch (const std::filesystem::filesystem_error& e) {
-            std::cerr << e.what() << '\n';
-            return EXIT_FAILURE;
-        }
-    } else if (command == "cat-file") {
-    if (argc <= 3) {
-      std::cerr << "Invalid arguments, required `-p <blob-sha>`\n";
-      return EXIT_FAILURE;
-    }
-    const std::string flag = argv[2];
-    if (flag != "-p") {
-      std::cerr << "Invalid flag for cat-file, expected `-p`\n";
-      return EXIT_FAILURE;
-    }
-    const std::string value = argv[3];
-    const std::string dir_name = value.substr(0, 2);
-    const std::string blob_sha = value.substr(2);
+  string out;
+  char buffer[32768];
 
-    std::string path = ".git/objects/" + dir_name + "/" + blob_sha;
-    zstr::ifstream input(path, std::ofstream::binary);
-    if (!input.is_open()) {
-      std::cerr << "Failed to open object file?\n";
-      return EXIT_FAILURE;
-    }
+  int ret;
+  do {
+    zs.next_out = reinterpret_cast<Bytef *>(buffer);
+    zs.avail_out = sizeof(buffer);
 
-    std::string object_str{std::istreambuf_iterator<char>(input),
-                           std::istreambuf_iterator<char>()};
-    input.close();
-    const auto object_content = object_str.substr(object_str.find('\0') + 1);
-    std::cout << object_content << std::flush;
+    ret = inflate(&zs, Z_NO_FLUSH);
+    if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR)
+      throw runtime_error("Decompression failed");
 
-  } else{
-    std::cerr << "Unknown command: " << command << "\n";
+    out.append(buffer, sizeof(buffer) - zs.avail_out);
+  } while (ret != Z_STREAM_END);
+
+  inflateEnd(&zs);
+  return out;
+}
+
+int main(int argc, char *argv[]) {
+  // Flush after every std::cout / std::cerr
+  cout << std::unitbuf;
+  cerr << std::unitbuf;
+
+  // You can use print statements as follows for debugging, they'll be visible
+  // when running tests.
+  cerr << "Logs from your program will appear here!\n";
+
+  if (argc < 2) {
+    cerr << "No command provided.\n";
     return EXIT_FAILURE;
   }
-    
-    return EXIT_SUCCESS;
+
+  string command = argv[1];
+
+  if (command == "init") {
+    try {
+      filesystem::create_directory(".git");
+      filesystem::create_directory(".git/objects");
+      filesystem::create_directory(".git/refs");
+
+      ofstream headFile(".git/HEAD");
+      if (headFile.is_open()) {
+        headFile << "ref: refs/heads/main\n";
+        headFile.close();
+      } else {
+        cerr << "Failed to create .git/HEAD file.\n";
+        return EXIT_FAILURE;
+      }
+
+      cout << "Initialized git directory\n";
+    } catch (const filesystem::filesystem_error &e) {
+      cerr << e.what() << '\n';
+      return EXIT_FAILURE;
+    }
+  } else if (command == "cat-file") {
+    int argp = 2;
+    string hash;
+    while (hash.empty()) {
+      argp++;
+      if (argc < argp) {
+        cerr << "No object hash provided.\n";
+        return EXIT_FAILURE;
+      }
+      if (argv[argp][0] != '-') {
+        hash = argv[argp];
+      }
+    }
+
+    string path = string(".git/objects/") + hash.substr(0, 2).data() + "/" +
+                  hash.substr(2).data();
+    ifstream file(path);
+    if (!file.is_open()) {
+      cerr << "Couldn't open file for the hash.\n";
+      return EXIT_FAILURE;
+    }
+
+    stringstream buffer;
+    buffer << file.rdbuf();
+    string compressed = buffer.str();
+
+    string decompressed = decompressZlib(compressed);
+    cout << decompressed.substr(decompressed.find('\0') + 1);
+  } else {
+    cerr << "Unknown command " << command << '\n';
+    return EXIT_FAILURE;
+  }
+
+  return EXIT_SUCCESS;
 }
